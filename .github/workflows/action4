@@ -1,101 +1,48 @@
-name: CI via Repository Dispatch (Static Analysis)
-
-on:
-  repository_dispatch:
-    types: [trigger-ci]
-
+name: team4_action
+run-name: ${{ github.actor }} is testing out GitHub Actions 🚀
+on: [push]
 jobs:
-  static-analysis:
+  Explore-GitHub-Actions:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Clone Repository
+      - run: echo "🎉 The job was automatically triggered by a ${{ github.event_name }} event."
+      - run: echo "🐧 This job is now running on a ${{ runner.os }} server hosted by GitHub!"
+      - run: echo "🔎 The name of your branch is ${{ github.ref }} and your repository is ${{ github.repository }}."
+      - name: Check out repository code
+        uses: actions/checkout@v4
+      - run: echo "💡 The ${{ github.repository }} repository has been cloned to the runner."
+      - run: echo "🖥️ The workflow is now ready to test your code on the runner."
+      - name: List files in the repository
         run: |
-          git clone https://github.com/${{ github.event.client_payload.repository }} source-code
-          cd source-code
-          git checkout ${{ github.event.client_payload.commit_sha }}
+          ls ${{ github.workspace }}
+      - run: echo "🍏 This job's status is ${{ job.status }}."
 
-      - name: Install Dependencies
+name: SonarQube
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  build:
+    name: Build and analyze
+    runs-on: macos-latest
+    env:
+      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: Install Build Wrapper
+        uses: SonarSource/sonarqube-scan-action/install-build-wrapper@v5
+      - name: Run Build Wrapper
         run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential cmake cppcheck clang-tidy gcovr libgtest-dev jq
-
-      - name: Install Google Test
-        run: |
-          cd /usr/src/gtest
-          sudo cmake .
-          sudo make
-          sudo cp lib/*.a /usr/lib
-
-      - name: Setup SonarCloud Scanner
-        uses: SonarSource/sonarcloud-github-action@master
+          build-wrapper-macosx-x86 --out-dir ${{ env.BUILD_WRAPPER_OUT_DIR }} <insert_your_clean_build_command>
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v5
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Download build-wrapper
-        run: |
-          curl -sSLo build-wrapper-linux-x86.zip https://sonarcloud.io/static/cpp/build-wrapper-linux-x86.zip
-          unzip build-wrapper-linux-x86.zip
-
-      - name: Build with Coverage (wrapped by SonarCloud build-wrapper)
-        run: |
-          mkdir build
-          cd build
-          cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON -DCMAKE_CXX_FLAGS="--coverage -O0" ../source-code
-          ../build-wrapper-linux-x86/build-wrapper-linux-x86-64 --out-dir ../bw-output make
-          make
-          ctest --output-on-failure || true
-
-      - name: Run cppcheck
-        run: |
-          cppcheck --enable=all --inconclusive --std=c++17 --language=c++ \
-                   -I source-code/include source-code/src 2> cppcheck-report.txt
-
-      - name: Display cppcheck Report
-        run: cat cppcheck-report.txt
-
-      - name: Run clang-tidy
-        run: |
-          mkdir -p clang-tidy-report
-          find source-code -name '*.cpp' | xargs -I {} clang-tidy {} -p build > clang-tidy-report/report.txt 2>&1 || true
-
-      - name: Display clang-tidy Report
-        run: cat clang-tidy-report/report.txt
-
-      - name: Generate Coverage Report
-        run: |
-          gcovr -r source-code --exclude tests --sonarqube -o coverage.xml
-
-      - name: Run SonarCloud Analysis
-        run: |
-          sonar-scanner \
-            -Dsonar.projectKey=${{ github.event.client_payload.repository }} \
-            -Dsonar.organization=YOUR_SONAR_ORG \
-            -Dsonar.sources=source-code/src \
-            -Dsonar.cfamily.build-wrapper-output=bw-output \
-            -Dsonar.coverageReportPaths=coverage.xml \
-            -Dsonar.scm.provider=git
-
-      - name: Fetch SonarCloud issues
-        run: |
-          curl -s -u ${{ secrets.SONAR_TOKEN }}: \
-            "https://sonarcloud.io/api/issues/search?projectKeys=${{ github.event.client_payload.repository }}&resolved=false&pageSize=500" \
-            -o sonar-issues.json
-
-      - name: Create GitHub Issue with SonarCloud results
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "| Type | Severity | File | Line | Description |" > issue-body.md
-          echo "|------|----------|------|------|-------------|" >> issue-body.md
-
-          jq -r '.issues[] | "| \(.type) | \(.severity) | \(.component | sub(\".*src/\"; \"\")) | \(.line // \"N/A\") | \(.message | gsub(\"[\r\n]\"; \" \")) |"' sonar-issues.json >> issue-body.md
-
-          if [ $(wc -l < issue-body.md) -gt 2 ]; then
-            gh issue create --title "SonarCloud Static Analysis Results" --body-file issue-body.md
-          else
-            echo "No issues found."
-          fi
-
-      - name: Show Coverage Report
-        run: cat coverage.xml
+        with:
+          args: >
+            --define sonar.cfamily.compile-commands="${{ env.BUILD_WRAPPER_OUT_DIR }}/compile_commands.json"
