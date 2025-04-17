@@ -4,13 +4,15 @@ on:
     branches:
       - main
   pull_request:
+    branches:
+      - main
     types: [opened, synchronize, reopened]
 jobs:
   build:
     name: Build and analyze
     runs-on: macos-latest
     env:
-      BUILD_WRAPPER_OUT_DIR: build_wrapper_output_directory # Directory where build-wrapper output will be placed
+      BUILD_WRAPPER_OUT_DIR: output # Directory where build-wrapper output will be placed
     steps:
       - uses: actions/checkout@v4
         with:
